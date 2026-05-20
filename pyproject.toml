@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "5AxisSlicer_test"
+version = "1.0.0"
+description = "Extensible Python rewrite of the Fractal Cortex five axis slicer."
+requires-python = ">=3.10"
+dependencies = [
+    "glooey==0.3.6",
+    "manifold3d==3.4.1",
+    "more-itertools==8.14.0",
+    "numpy==1.26.4",
+    "numpy-stl==3.1.1",
+    "pyglet==1.5.28",
+    "PyOpenGL==3.1.0",
+    "shapely==2.0.4",
+    "trimesh==4.3.1",
+]
+
+[project.scripts]
+five-axis-slicer = "five_axis_slicer.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+five_axis_slicer = ["assets/**/*"]
