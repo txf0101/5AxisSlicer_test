@@ -9,7 +9,7 @@ from . import legacy_engine
 from .settings import PrintSettings, SlicingPlan
 
 
-"""Public slicing API used by tests, scripts, and future non-GUI callers.
+"""Public slicing API used by scripts and future non-GUI callers.
 
 The heavy geometric work still lives in :mod:`legacy_engine`. This file is a
 small boundary layer with two purposes:
@@ -22,7 +22,7 @@ should remain localized, because that file preserves a reference algorithm and
 contains many positional data contracts.
 
 给不熟悉代码的人看的说明：
-    这个文件可以理解为“切片功能的前台服务窗口”。外部脚本或测试只需要把
+    这个文件可以理解为“切片功能的前台服务窗口”。外部脚本只需要把
     模型和参数交给这里，不需要直接接触复杂的几何算法文件。
 
     三轴切片入口是 `slice_meshes_3_axis()`。它适合普通逐层打印。

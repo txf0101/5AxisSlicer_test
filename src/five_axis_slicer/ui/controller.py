@@ -49,7 +49,7 @@ Developer notes:
 
     For new features, prefer adding a small helper near the related callback
     before changing the large widget-construction block. That keeps behavior
-    easier to test with the smoke scripts.
+    easier to review with small scripted runs.
 """
 
 # Adding a custom font

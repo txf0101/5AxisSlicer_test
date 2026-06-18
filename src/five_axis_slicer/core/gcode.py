@@ -10,7 +10,7 @@ from .slicer import SliceResult
 """G-code export helpers.
 
 The slicer stores calculated paths as Shapely and Trimesh objects. This module
-keeps file export behind two small functions so GUI code, smoke tests, and
+keeps file export behind two small functions so GUI code, scripts, and
 future CLI commands do not need to know the long positional argument lists of
 the legacy writers.
 
@@ -18,7 +18,7 @@ the legacy writers.
     哪里，什么时候挤出材料，什么时候加热，什么时候结束打印。
 
     切片算法算出来的是“路径数据”。这个文件负责把路径数据交给旧写出函数，
-    由旧写出函数把路径变成真正的 `.gcode` 文件。这样界面和测试脚本只要
+    由旧写出函数把路径变成真正的 `.gcode` 文件。这样界面和自动化脚本只要
     调用这里的两个函数，不需要知道旧写出函数的很多参数顺序。
 """
 

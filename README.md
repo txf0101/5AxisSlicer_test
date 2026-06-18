@@ -36,12 +36,9 @@ pip install -r requirements.txt
   not yet know the codebase or the slicing workflow.
 - `docs/MAINTAINER_GUIDE.md`: maintainer-oriented project map, data flow, and
   extension notes for new developers.
-- `tools/smoke_core.py`: minimal core slicing and G-code write smoke check.
-- `tools/smoke_language.py`: bilingual UI state smoke check.
 - `tools/regenerate_ui_theme.py`: helper for regenerating GUI image assets.
 - `example/pipe`: the current locally generated pipe fitting G-code output.
 - `run_app.ps1`: starts the GUI in the `5AxisSlicer` Conda environment.
-- `run_smoke.ps1`: runs the smoke checks.
 
 ## Reference Basis
 
@@ -77,12 +74,6 @@ Pinned geometry dependencies are important for robust slice polygon recovery:
 
 ```powershell
 .\run_app.ps1
-```
-
-## Smoke Check
-
-```powershell
-.\run_smoke.ps1
 ```
 
 ## Pipe Fitting Local Output

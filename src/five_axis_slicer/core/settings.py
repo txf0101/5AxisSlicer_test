@@ -113,7 +113,7 @@ class SliceDirection:
 
     `start` is a point on the plane. `theta` and `phi` describe the plane
     normal with the same spherical-angle convention used by the GUI. Values are
-    stored as plain tuples and floats so they remain easy to serialize in tests
+    stored as plain tuples and floats so they remain easy to serialize in scripts
     or future command-line tools.
     """
 

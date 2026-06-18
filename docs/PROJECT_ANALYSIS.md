@@ -7,12 +7,11 @@
 | 类型 | 文件 |
 | --- | --- |
 | 项目说明 | `README.md` |
-| 依赖与命令入口 | `pyproject.toml`、`requirements.txt`、`run_app.ps1`、`run_smoke.ps1` |
+| 依赖与命令入口 | `pyproject.toml`、`requirements.txt`、`run_app.ps1` |
 | 应用入口 | `src/five_axis_slicer/app.py`、`src/five_axis_slicer/__main__.py` |
 | 界面层 | `src/five_axis_slicer/ui/window.py`、`src/five_axis_slicer/ui/controller.py`、`src/five_axis_slicer/ui/widgets.py` |
 | 切片核心 | `src/five_axis_slicer/core/settings.py`、`src/five_axis_slicer/core/slicer.py`、`src/five_axis_slicer/core/legacy_engine.py`、`src/five_axis_slicer/core/gcode.py` |
 | 示例输出 | `example/pipe/pipe_fitting.gcode` |
-| 验证脚本 | `tools/smoke_core.py`、`tools/smoke_language.py` |
 
 ## 2. 项目定位
 
@@ -24,7 +23,7 @@
 
 应用入口很短，便于定位。`src/five_axis_slicer/app.py` 从 `ui.window` 导入 `main()` 并执行。`src/five_axis_slicer/__main__.py` 允许使用 `python -m five_axis_slicer` 启动。`pyproject.toml` 中的脚本入口 `five-axis-slicer = "five_axis_slicer.app:main"` 说明该项目安装成包后也可以通过命令行脚本启动。
 
-在日常开发中，仓库提供了 `run_app.ps1` 和 `run_smoke.ps1`。前者用于启动 GUI，后者用于运行烟雾测试。README 中提示使用现有 Conda 环境 `5AxisSlicer`，并要求安装 `requirements.txt` 中的依赖。
+在日常使用中，仓库提供了 `run_app.ps1` 启动 GUI。README 中提示使用现有 Conda 环境 `5AxisSlicer`，并要求安装 `requirements.txt` 中的依赖。
 
 ## 4. 目录结构
 
@@ -32,7 +31,7 @@
 
 `src/five_axis_slicer/ui` 是界面层。`window.py` 负责 Pyglet 窗口、OpenGL 渲染、STL 载入、预览绘制和后台计算调度。`controller.py` 负责界面控件实例、页签切换、语言切换、切片按钮、参数读取和保存 G-code。`widgets.py` 封装按钮、单选框、复选框、输入框等常用控件。
 
-`src/five_axis_slicer/assets` 保存字体和由脚本生成的按钮图片。`tools` 保存轻量验证脚本。`example/pipe/pipe_fitting.gcode` 是当前本地生成并纳入版本管理的管件 G-code 输出。
+`src/five_axis_slicer/assets` 保存字体和由脚本生成的按钮图片。`tools` 保存界面资源维护脚本。`example/pipe/pipe_fitting.gcode` 是当前本地生成并纳入版本管理的管件 G-code 输出。
 
 ## 5. 界面层工作方式
 
@@ -98,24 +97,4 @@ G-code 写出函数位于 `core/legacy_engine.py`，对外封装位于 `core/gco
 
 `supports` 页签文字标注为“启用支撑（待实现）”，说明支撑生成当前仍属于预留功能。附着页签的边裙已经接入 `enableBrim`。喷头运动参数已改为只在“喷头运动”页签显示，减少在其他页签下出现无标签框和勾选框的情况。
 
-后续维护建议优先关注四点。第一，继续把 `legacy_engine.py` 中的长函数拆出更小的纯函数，并用 `core/slicer.py` 暴露稳定入口。第二，为五轴切片增加小型 STL 的固定回归测试，重点覆盖 chunk 数量、联动旋转轴和 G-code 头部参数。第三，给切片平面编辑区增加当前方向的可视化说明，避免 theta 与 phi 的输入含义混淆。第四，遇到 polygon 恢复问题时保留触发层号、切片方向和模型边界信息，便于复现。
-
-## 13. 验证方式
-
-建议在 `5AxisSlicer` Conda 环境中运行：
-
-```powershell
-.\run_smoke.ps1
-```
-
-也可以直接执行核心烟雾测试：
-
-```powershell
-& 'C:\Users\Tang Xufeng\.conda\envs\5AxisSlicer\python.exe' tools\smoke_core.py
-```
-
-若需要检查语法层面的导入错误，可执行：
-
-```powershell
-& 'C:\Users\Tang Xufeng\.conda\envs\5AxisSlicer\python.exe' -m compileall -q src tools
-```
+后续维护建议优先关注四点。第一，继续把 `legacy_engine.py` 中的长函数拆出更小的纯函数，并用 `core/slicer.py` 暴露稳定入口。第二，为五轴切片保留小型 STL 的固定输入样例和输出样例，重点覆盖 chunk 数量、联动旋转轴和 G-code 头部参数。第三，给切片平面编辑区增加当前方向的可视化说明，避免 theta 与 phi 的输入含义混淆。第四，遇到 polygon 恢复问题时保留触发层号、切片方向和模型边界信息，便于复现。

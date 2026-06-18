@@ -391,7 +391,7 @@ class Spin_Box_EditableLabel(glooey.EditableLabel):
 
     def on_window_mouse_press(self, x, y, button, modifiers):
         # Check if mouse is outside of the label when clicked. If so, call the on_mouse_leave function
-        # If I need to troubleshoot this in the future, I can try testing x and y against self.rect
+        # If this needs troubleshooting later, compare x and y against self.rect.
         self.on_mouse_leave(x, y)
 
         if not self._is_mouse_over:
@@ -1464,7 +1464,7 @@ class Entry_Box_EditableLabel(glooey.EditableLabel):
 
     def on_window_mouse_press(self, x, y, button, modifiers):
         # Check if mouse is outside of the label when clicked. If so, call the on_mouse_leave function
-        # If I need to troubleshoot this in the future, I can try testing x and y against self.rect
+        # If this needs troubleshooting later, compare x and y against self.rect.
         self.on_mouse_leave(x, y)
 
         if not self._is_mouse_over:

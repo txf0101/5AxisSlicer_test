@@ -149,7 +149,7 @@ class Graphics_Window(pyglet.window.Window):  # Custom pyglet window which conta
     state, and preview buffers. This mirrors the original GUI design and lets
     callback functions access state without passing a window object everywhere.
     New code should prefer instance attributes when possible, then migrate one
-    class dictionary at a time when behavior is covered by smoke tests.
+    class dictionary at a time when behavior is covered by small scripted runs.
     """
 
     # Initialize Class Variables:
@@ -248,7 +248,7 @@ class Graphics_Window(pyglet.window.Window):  # Custom pyglet window which conta
     def slicing_calculations(self, meshData):
         """Worker-thread entry point that calls the controller slicing callback."""
         slice_function(meshData)
-        result = 'test'
+        result = 'done'
         return result
 
     def TEST_slicing_callback(self, result):
