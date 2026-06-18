@@ -4,12 +4,38 @@ This repository contains a focused Python replication of the Fractal Cortex
 five axis slicer workflow. It is intended as a backup and version management
 repository for the current replicated project state.
 
+## 中文简述
+
+本仓库保存 5AxisSlicer 的当前项目状态，用于五轴 FDM 切片流程的备份、
+演示和后续维护。项目主体位于 `src/five_axis_slicer`，桌面界面使用
+Pyglet/Glooey，几何计算依赖 Trimesh、Shapely 和 Manifold3D。
+
+运行前使用现有 Conda 环境并安装依赖：
+
+```powershell
+conda activate 5AxisSlicer
+pip install -r requirements.txt
+```
+
+启动界面：
+
+```powershell
+.\run_app.ps1
+```
+
+示例目录只保留 `example/pipe`：`pipe_fitting.stl` 是输入模型，
+`pipe_fitting.gcode` 是当前本地生成的输出。
+
 ## Contents
 
 - `src/five_axis_slicer/core`: slicing settings, 3 axis and 5 axis slicing
   entry points, legacy algorithm bridge, and G-code writing logic.
 - `src/five_axis_slicer/ui`: Pyglet and Glooey user interface code.
 - `src/five_axis_slicer/assets`: packaged fonts and generated button images.
+- `docs/BEGINNER_PROJECT_GUIDE.md`: Chinese beginner guide for readers who do
+  not yet know the codebase or the slicing workflow.
+- `docs/MAINTAINER_GUIDE.md`: maintainer-oriented project map, data flow, and
+  extension notes for new developers.
 - `tools/smoke_core.py`: minimal core slicing and G-code write smoke check.
 - `tools/smoke_language.py`: bilingual UI state smoke check.
 - `tools/regenerate_ui_theme.py`: helper for regenerating GUI image assets.

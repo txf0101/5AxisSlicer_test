@@ -34,6 +34,22 @@ from five_axis_slicer.core.legacy_engine import *
 """
 Instantiates and places all widgets within the GUI.
 Contains all functions that are triggered upon interacting with widgets.
+
+Developer notes:
+    This module is still close to the original Fractal Cortex GUI style. It
+    creates many widgets at import time and stores current UI state in module
+    globals. That design makes the event callbacks short, but it also means
+    future changes must track shared state carefully. When maintaining this
+    file, read it as four layers:
+
+    1. global state and localized text tables;
+    2. helper functions that synchronize text, decks, and widget states;
+    3. callbacks that respond to user actions;
+    4. widget construction and final registration.
+
+    For new features, prefer adding a small helper near the related callback
+    before changing the large widget-construction block. That keeps behavior
+    easier to test with the smoke scripts.
 """
 
 # Adding a custom font
@@ -41,6 +57,18 @@ pyglet.font.add_file(str(ASSET_DIR / "Roboto-Regular.ttf"))
 pyglet.font.load("Roboto")
 
 """ GLOBAL VARIABLES """
+# The variables in this block mirror user-editable GUI values. The current
+# application still passes these values into legacy slicer functions as a
+# positional list, so every value here should be kept in sync with:
+#
+# * the visible widget that edits it;
+# * `update_values()`, which reads the widget state;
+# * `slice_function()`, which builds `printSettings`;
+# * `core.settings.PrintSettings`, which exposes the cleaner public API.
+#
+# Avoid adding a new global without also documenting how it enters slicing or
+# rendering. Unused globals make this module much harder for new maintainers to
+# reason about.
 # Geometry Action Variables
 translateX = 0.0
 translateY = 0.0
@@ -67,6 +95,8 @@ retractionDistance = 1.0
 retractionSpeed = 20.0
 enableSupports = False
 enableBrim = False
+linkedAxisASymbol = "A"
+linkedAxisBSymbol = "B"
 
 buildPlateBounds = [-150, 150]
 zBounds = [0, 300]
@@ -90,6 +120,10 @@ widgetHeightSpacing = 40
 popUpWidgetHeightSpacing = 35
 
 CURRENT_LANGUAGE = "zh"
+# Localization registries. Widgets are registered once after construction, then
+# `apply_language()` uses these registries whenever the language changes. This
+# indirection matters because many settings rows are Glooey decks: inactive deck
+# labels must be cleared so text from one tab cannot leak into another tab.
 LOCALIZED_WIDGETS = []
 LOCALIZED_RADIOS = []
 SETTINGS_TEXT_WIDGETS = {}
@@ -97,6 +131,8 @@ SETTINGS_UNIT_WIDGETS = {}
 GEOMETRY_TEXT_WIDGETS = {}
 
 TEXT = {
+    # All visible text is keyed here so the Chinese and English UI can be kept
+    # in sync without hunting through every widget definition.
     "zh": {
         "language.toggle": "中文 / EN",
         "app.title": "五轴切片器",
@@ -108,7 +144,7 @@ TEXT = {
         "option.material": "材料",
         "option.strength": "强度",
         "option.resolution": "精度",
-        "option.movement": "运动",
+        "option.movement": "喷头运动",
         "option.supports": "支撑",
         "option.adhesion": "附着",
         "action.translate": "移动",
@@ -128,10 +164,13 @@ TEXT = {
         "settings.initial_print_speed": "    初始打印速度",
         "settings.travel_speed": "空驶速度",
         "settings.initial_travel_speed": "    初始空驶速度",
-        "settings.z_hop": "空驶时抬 Z",
-        "settings.retraction": "启用回抽",
+        "settings.z_hop": "空驶抬 Z（避开模型）",
+        "settings.retraction": "启用回抽（减少拉丝）",
         "settings.retraction_distance": "    回抽距离",
         "settings.retraction_speed": "    回抽速度",
+        "settings.linked_axis_a": "联动轴 1 符号",
+        "settings.linked_axis_b": "联动轴 2 符号",
+        "settings.movement_help": "说明：回抽距离和速度只在启用回抽后生效。",
         "settings.supports": "启用支撑（待实现）",
         "settings.brim": "启用边裙",
         "slicing.start_count": "初始切片方向数量",
@@ -182,10 +221,13 @@ TEXT = {
         "settings.initial_print_speed": "    Initial Print Speed",
         "settings.travel_speed": "Travel Speed",
         "settings.initial_travel_speed": "    Initial Travel Speed",
-        "settings.z_hop": "Enable Z Hop When Travelling",
-        "settings.retraction": "Enable Retraction",
+        "settings.z_hop": "Z Hop During Travel",
+        "settings.retraction": "Retraction",
         "settings.retraction_distance": "    Retraction Distance",
         "settings.retraction_speed": "    Retraction Speed",
+        "settings.linked_axis_a": "Linked Axis 1 Symbol",
+        "settings.linked_axis_b": "Linked Axis 2 Symbol",
+        "settings.movement_help": "Note: distance and speed only apply when retraction is enabled.",
         "settings.supports": "Enable Supports (not implemented)",
         "settings.brim": "Enable Brim",
         "slicing.start_count": "Starting Number of Slicing Directions",
@@ -211,14 +253,26 @@ CURRENT_SLICE_STATUS_KEY = "slice.status.idle"
 
 
 def current_font_name():
+    """Return the font family appropriate for the active UI language.
+
+    Chinese labels need a CJK-capable system font. English labels use the
+    packaged Roboto font loaded near the top of the module.
+    """
     return "Microsoft YaHei UI" if CURRENT_LANGUAGE == "zh" else "Roboto"
 
 
 def t(key):
+    """Translate a stable text key using the current language table."""
     return TEXT[CURRENT_LANGUAGE][key]
 
 
 def set_widget_text(widget, value):
+    """Set text on the mixed widget types used by this GUI.
+
+    Glooey labels, button foreground labels, and local wrapper widgets expose
+    slightly different text APIs. Centralizing the compatibility logic prevents
+    every language-switching function from carrying the same `hasattr` checks.
+    """
     if hasattr(widget, "set_text"):
         widget.set_text(value)
     elif hasattr(widget, "text"):
@@ -228,30 +282,41 @@ def set_widget_text(widget, value):
 
 
 def register_text(key, widget):
+    """Register a language key with a widget that should always be translated."""
     LOCALIZED_WIDGETS.append((key, widget))
     return widget
 
 
 def register_button_text(key, button):
+    """Register the foreground label of a button for language switching."""
     register_text(key, button.get_foreground())
 
 
 def register_settings_text(state, key, widget):
+    """Register a settings-row label for one option tab.
+
+    `state` is the deck state, such as "material" or "movement". The active
+    state receives translated text; inactive states are cleared to avoid stale
+    labels being visible behind reused deck rows.
+    """
     SETTINGS_TEXT_WIDGETS.setdefault(state, []).append((key, widget))
     return widget
 
 
 def register_settings_unit(state, key, entry_box):
+    """Register the unit label of an entry box for one settings tab."""
     SETTINGS_UNIT_WIDGETS.setdefault(state, []).append((key, entry_box.label))
     return entry_box
 
 
 def register_geometry_text(state, key, widget):
+    """Register a left-toolbar geometry label for one action state."""
     GEOMETRY_TEXT_WIDGETS.setdefault(state, []).append((key, widget))
     return widget
 
 
 def clear_registered_texts(widget_map, except_state=None):
+    """Clear text for inactive deck states before the active state is filled."""
     for state, pairs in widget_map.items():
         if state == except_state:
             continue
@@ -260,15 +325,18 @@ def clear_registered_texts(widget_map, except_state=None):
 
 
 def clear_settings_language(except_state=None):
+    """Clear inactive settings labels and units."""
     clear_registered_texts(SETTINGS_TEXT_WIDGETS, except_state)
     clear_registered_texts(SETTINGS_UNIT_WIDGETS, except_state)
 
 
 def clear_geometry_language(except_state=None):
+    """Clear inactive left-toolbar labels."""
     clear_registered_texts(GEOMETRY_TEXT_WIDGETS, except_state)
 
 
 def apply_settings_language(state=None):
+    """Apply translated settings labels for the currently visible settings tab."""
     state = state or settingsState
     clear_settings_language(except_state=state)
     for key, widget in SETTINGS_TEXT_WIDGETS.get(state, []):
@@ -278,6 +346,7 @@ def apply_settings_language(state=None):
 
 
 def apply_geometry_language(state=None):
+    """Apply translated labels for the currently selected geometry action."""
     state = state or geometryActionState
     clear_geometry_language(except_state=state)
     for key, widget in GEOMETRY_TEXT_WIDGETS.get(state, []):
@@ -285,6 +354,13 @@ def apply_geometry_language(state=None):
 
 
 def apply_language():
+    """Refresh every localized widget after a language change.
+
+    This function deliberately updates labels, radio button styles, deck-specific
+    labels, image-backed slicing panels, and status text in one place. Adding a
+    visible text feature elsewhere should usually mean registering it here
+    through one of the registration helpers.
+    """
     for key, widget in LOCALIZED_WIDGETS:
         set_widget_text(widget, t(key))
     for radio_group in LOCALIZED_RADIOS:
@@ -302,23 +378,32 @@ def apply_language():
 
 
 def refresh_slice_status():
+    """Rewrite the slice status label using the current language."""
     if "L_sliceStatus" in globals():
         set_widget_text(L_sliceStatus, t(CURRENT_SLICE_STATUS_KEY))
 
 
 def set_slice_status(key):
+    """Store a stable status key and update the visible status label."""
     global CURRENT_SLICE_STATUS_KEY
     CURRENT_SLICE_STATUS_KEY = key
     refresh_slice_status()
 
 
 def toggle_language():
+    """Switch between Chinese and English without changing functional state."""
     global CURRENT_LANGUAGE
     CURRENT_LANGUAGE = "en" if CURRENT_LANGUAGE == "zh" else "zh"
     apply_language()
 
 
 def register_radio_texts(group, keys):
+    """Attach translation keys to a labeled radio group.
+
+    Radio buttons contain nested label widgets, so callers pass the group and
+    one key per displayed option. The labels are registered only for groups that
+    actually render text.
+    """
     LOCALIZED_RADIOS.append({"group": group, "keys": keys})
     if not group.isLabeled:
         return
@@ -329,6 +414,7 @@ def register_radio_texts(group, keys):
 """ WIDGET FUNCTIONS """
 
 def cycle_decks(width, height):
+    """Synchronize all deck widgets with the current logical UI states."""
     set_geometry_action_deck_states(geometryActionState)
     geometryActionBackgroundDeck.set_state(geometryActionBackgroundState)
 
@@ -337,6 +423,7 @@ def cycle_decks(width, height):
     apply_geometry_language(geometryActionState)
 
 def set_geometry_action_deck_states(currentState):
+    """Show the translate, rotate, scale, or blank deck across toolbar rows."""
     r0GeometryActionDeck.set_state(currentState)
     r2c0GeometryActionDeck.set_state(currentState)
     r2c1GeometryActionDeck.set_state(currentState)
@@ -345,7 +432,48 @@ def set_geometry_action_deck_states(currentState):
     r4c0GeometryActionDeck.set_state(currentState)
     r4c1GeometryActionDeck.set_state(currentState)
 
+
+def set_movement_detail_visibility(currentState):
+    """Show the lower motion controls only when the Motion tab is active.
+
+    The highlighted controls in the screenshot are Z hop, retraction, retraction
+    distance, and retraction speed. They belong to the motion page, so hiding
+    them on the material/strength/resolution pages keeps the settings panel
+    from showing unexplained checkboxes and number boxes.
+    """
+    should_show = currentState == "movement"
+    movement_widgets = [
+        "r4c0SettingsDeck",
+        "r4c1SettingsDeck",
+        "r5c0SettingsDeck",
+        "r5c1SettingsDeck",
+        "r6c0SettingsDeck",
+        "r6c1SettingsDeck",
+        "r7c0SettingsDeck",
+        "r7c1SettingsDeck",
+        "r8c0SettingsDeck",
+        "r8c1SettingsDeck",
+        "r9c0SettingsDeck",
+        "r9c1SettingsDeck",
+        "L_movementHelp",
+    ]
+    for widget_name in movement_widgets:
+        widget = globals().get(widget_name)
+        if widget is None:
+            continue
+        if should_show:
+            widget.unhide()
+        else:
+            widget.hide()
+
+
 def set_settings_deck_states(currentState):
+    """Show one settings tab across every settings row deck.
+
+    Each row in the settings panel is a separate `glooey.Deck`. Switching tabs
+    means setting the same state on every row, then hiding motion-only lower
+    rows when they should not appear.
+    """
     r0c0SettingsDeck.set_state(currentState)
     r0c1SettingsDeck.set_state(currentState)
     r1c0SettingsDeck.set_state(currentState)
@@ -362,6 +490,11 @@ def set_settings_deck_states(currentState):
     r6c1SettingsDeck.set_state(currentState)
     r7c0SettingsDeck.set_state(currentState)
     r7c1SettingsDeck.set_state(currentState)
+    r8c0SettingsDeck.set_state(currentState)
+    r8c1SettingsDeck.set_state(currentState)
+    r9c0SettingsDeck.set_state(currentState)
+    r9c1SettingsDeck.set_state(currentState)
+    set_movement_detail_visibility(currentState)
 
 transform3DList = None
 adhesionList = None
@@ -375,6 +508,13 @@ chunk_optimizedInternalInfills = None
 chunk_optimizedSolidInfills = None
 
 def disable_all_settings():
+    """Disable editable settings while Preview mode is showing generated paths.
+
+    Preview renders a snapshot of the most recent slicing result. Editing values
+    while preview data is active would make the displayed toolpath disagree with
+    the form state, so this function locks the editable widgets until the user
+    returns to Prepare mode.
+    """
     r0c1SettingsDeck.get_widget("material").set_disabled(True)
     r0c1SettingsDeck.get_widget("strength").set_disabled(True)
     r0c1SettingsDeck.get_widget("resolution").set_disabled(True)
@@ -396,8 +536,11 @@ def disable_all_settings():
     r5c1SettingsDeck.get_widget("movement").set_disabled(True)
     r6c1SettingsDeck.get_widget("movement").get_widget("enabled").set_disabled(True)
     r7c1SettingsDeck.get_widget("movement").get_widget("enabled").set_disabled(True)
+    r8c1SettingsDeck.get_widget("movement").set_disabled(True)
+    r9c1SettingsDeck.get_widget("movement").set_disabled(True)
 
 def enable_all_settings():
+    """Re-enable settings when the user returns from Preview to Prepare."""
     r0c1SettingsDeck.get_widget("material").set_disabled(False)
     r0c1SettingsDeck.get_widget("strength").set_disabled(False)
     r0c1SettingsDeck.get_widget("resolution").set_disabled(False)
@@ -419,8 +562,17 @@ def enable_all_settings():
     r5c1SettingsDeck.get_widget("movement").set_disabled(False)
     r6c1SettingsDeck.get_widget("movement").get_widget("enabled").set_disabled(False)
     r7c1SettingsDeck.get_widget("movement").get_widget("enabled").set_disabled(False)
+    r8c1SettingsDeck.get_widget("movement").set_disabled(False)
+    r9c1SettingsDeck.get_widget("movement").set_disabled(False)
 
 def toggle_viewMode_layout(parentWidget):
+    """Switch between model preparation and rendered toolpath preview.
+
+    In Preview mode, raw slice data is converted to renderable vertices only
+    once. `R_viewMode.preRendered` records whether that conversion already
+    happened, and `sliceButtonDeck` changes from Slice to Save once toolpaths
+    are available.
+    """
     global \
         transform3DList, \
         adhesionList, \
@@ -458,6 +610,7 @@ def toggle_viewMode_layout(parentWidget):
             sliceButtonDeck.set_state("B_slice")
 
 def toggle_left_toolbar_layout(parentWidget):
+    """React to Translate, Rotate, Scale, or Deactivated toolbar selection."""
     global geometryActionState, geometryActionBackgroundState
     unhide_geometry_action_pop_up_window()
     selectedAction = parentWidget.currentlyChecked
@@ -483,13 +636,16 @@ def toggle_left_toolbar_layout(parentWidget):
     apply_geometry_language(currentState)
 
 def unhide_geometry_action_pop_up_window():
+    """Show the geometry action pop-up row."""
     r0GeometryActionDeck.unhide()
 
 def hide_geometry_action_pop_up_window():
+    """Hide geometry action controls and reset their decks to blank."""
     geometryActionBackgroundDeck.set_state("deactivated")
     set_geometry_action_deck_states("blank")
 
 def toggle_printMode_layout(parentWidget):
+    """Switch the right panel between 3-axis and 5-axis workflows."""
     printMode = parentWidget.currentlyChecked
     if printMode == "3-Axis Mode":
         enable_3_axis_mode()
@@ -497,6 +653,7 @@ def toggle_printMode_layout(parentWidget):
         enable_5_axis_mode()
 
 def toggle_settings_layout(parentWidget):
+    """Switch between Material, Strength, Resolution, Movement, Supports, and Adhesion."""
     global settingsState
     update_values()
     selectedMenu = parentWidget.currentlyChecked
@@ -523,12 +680,22 @@ def toggle_settings_layout(parentWidget):
     apply_settings_language(currentState)
 
 def update_mode_placeholder(parentWidget):
+    """Reserved callback for future print-mode placeholder updates."""
     mode = parentWidget.currentlyChecked
 
 def apply_placeholder():
+    """Reserved hook for future placeholder refresh behavior."""
     pass
 
 def update_values():
+    """Read all current widget values back into module-level state.
+
+    Glooey decks keep widgets alive even when their tab is hidden, so values can
+    be read from every tab at slicing time. Several `try` blocks are kept here
+    because some widgets are created or attached later in startup; during early
+    initialization, a missing widget should not prevent the rest of the UI from
+    loading.
+    """
     global nozzleTemp, E_nozzleTemp, initialNozzleTemp, E_initialNozzleTemp, bedTemp, E_bedTemp, initialBedTemp, E_initialBedTemp
     global infillPercentage, E_infillPercentage, shellThickness, E_shellThickness
     global layerHeight, E_layerHeight
@@ -548,7 +715,9 @@ def update_values():
         retractionDistance, \
         E_retractionDistance, \
         retractionSpeed, \
-        E_retractionSpeed
+        E_retractionSpeed, \
+        linkedAxisASymbol, \
+        linkedAxisBSymbol
     global enableSupports, C_enableSupports
     global enableBrim, C_enableBrim
     try:
@@ -568,12 +737,17 @@ def update_values():
     except:
         pass
     try:
+        # Motion settings are intentionally read from the movement state even
+        # when those widgets are hidden on other tabs. Hiding affects layout
+        # only; saved values remain available for slicing and G-code export.
         printSpeed = r0c1SettingsDeck.get_widget("movement").entryBoxEditableLabel.get_text()
         initialPrintSpeed = r1c1SettingsDeck.get_widget("movement").entryBoxEditableLabel.get_text()
         travelSpeed = r2c1SettingsDeck.get_widget("movement").entryBoxEditableLabel.get_text()
         initialTravelSpeed = r3c1SettingsDeck.get_widget("movement").entryBoxEditableLabel.get_text()
         enableZHop = r4c1SettingsDeck.get_widget("movement").is_checked
         enableRetraction = r5c1SettingsDeck.get_widget("movement").is_checked
+        linkedAxisASymbol = r8c1SettingsDeck.get_widget("movement").entryBoxEditableLabel.get_text().strip() or "A"
+        linkedAxisBSymbol = r9c1SettingsDeck.get_widget("movement").entryBoxEditableLabel.get_text().strip() or "B"
     except:
         pass
     try:
@@ -591,6 +765,7 @@ def update_values():
         pass
 
 def print_slicing_parameters():
+    """Print current slicing parameters for manual debugging."""
     print("nozzleTemp:", nozzleTemp, "\n")
     print("initialNozzleTemp:", initialNozzleTemp, "\n")
     print("bedTemp:", bedTemp, "\n")
@@ -609,12 +784,22 @@ def print_slicing_parameters():
         print("Retraction Speed:", retractionSpeed, "\n")
     print("enableSupports:", enableSupports, "\n")
     print("enableBrim:", enableBrim, "\n")
+    print("linkedAxisASymbol:", linkedAxisASymbol, "\n")
+    print("linkedAxisBSymbol:", linkedAxisBSymbol, "\n")
 
 def set_sliceFlag(args):
+    """Mark the slice button as requested and clear the status message."""
     sliceButtonDeck.get_widget("B_slice").sliceFlag = True
     set_slice_status("slice.status.idle")
 
 def slice_function(meshData):
+    """Run slicing for the currently selected print mode.
+
+    `meshData` uses the legacy shape `[loaded_indices, mesh_dict]`. The function
+    updates current GUI values, builds the positional `printSettings` list, then
+    calls the matching legacy slicer. Results are kept in module globals because
+    preview rendering and G-code saving read them later from separate callbacks.
+    """
     global \
         printSettings, \
         transform3DList, \
@@ -646,6 +831,8 @@ def slice_function(meshData):
         retractionSpeed,
         enableSupports,
         enableBrim,
+        linkedAxisASymbol,
+        linkedAxisBSymbol,
     ]
 
     if sliceButtonDeck.get_widget("B_slice").argsList[0][0] != []: # Only proceed with slicing if there are STL's to slice
@@ -673,6 +860,12 @@ def slice_function(meshData):
         R_viewMode.set_disabled(False)
 
 def save_gcode_as(fileName):
+    """Ask the user for a destination and write the most recent slice result.
+
+    The file dialog supplies the final path. The function selects the matching
+    legacy writer based on the active print mode and passes the stored result
+    structures produced by `slice_function()`.
+    """
     global \
         printSettings, \
         transform3DList, \
@@ -735,6 +928,12 @@ def save_gcode_as(fileName):
 
 fileKey = 0  # Keeps track of which file has been opened
 def select_file():      # Called when the user clicks the file select button
+    """Open an STL file dialog and register the selected file path.
+
+    The selected path is stored in `B_selectFile.D_variables` under a monotonical
+    file key. `window.py` later notices that new key and loads the STL into a
+    Trimesh object and OpenGL buffers.
+    """
     global selectedNewFile, fileKey
     desktopDirectory = os.path.join(
         os.path.expanduser("~"), "Desktop"
@@ -848,6 +1047,7 @@ def checkSlicePlaneValidity():
     return validityCheck
 
 def set_numSlicingDirections():
+    """Create the initial list of user-editable 5-axis slicing directions."""
     global numSlicingDirections, slicingDirectionList, startingPositions, directions, D_slicePlaneValidity
     numSlicingDirections = S_numSlicingDirections.entryBox.entryBoxEditableLabel.get_text()
     if numSlicingDirections in NANs:
@@ -884,6 +1084,7 @@ def set_numSlicingDirections():
     update_current_selection()
 
 def add_new_slicing_direction():
+    """Append one new 5-axis slicing direction and select it in the UI."""
     global slicingDirectionList, startingPositions, directions, D_slicePlaneValidity
     if slicingDirectionList[-1] < maxSlicingDirections:
         newMaxValue = slicingDirectionList[-1] + 1
@@ -902,6 +1103,7 @@ def add_new_slicing_direction():
         R_optionMode.D_variables['numSlicingDirections'] = newMaxValue # Update this so it can be retrieved from the main script
 
 def remove_slicing_direction():
+    """Remove the last user-created slicing direction while preserving two minimum."""
     global slicingDirectionList, startingPositions, directions, D_slicePlaneValidity
     if slicingDirectionList[-1] > 2:
         newMaxValue = slicingDirectionList[-1] - 1
@@ -919,6 +1121,7 @@ def remove_slicing_direction():
         R_optionMode.D_variables['numSlicingDirections'] = newMaxValue                                      # Update this so it can be retrieved from the main script
 
 def remove_all_slicing_directions():
+    """Reset the 5-axis direction editor to its initial starter state."""
     global numSlicingDirections, slicingDirectionList, startingPositions, directions, D_slicePlaneValidity
     numSlicingDirections = 1
     slicingDirectionList = []
@@ -937,6 +1140,7 @@ def remove_all_slicing_directions():
     enable_5_axis_mode()
 
 def update_starting_positions():  # This is called every time the up or down button is pressed on a starting position spin box. This should also be called every time the text is updated on them
+    """Copy the current X, Y, Z spin box values into `startingPositions`."""
     global startingPositions
     currentIndex = (int(S_currentSlicingDirection.entryBox.entryBoxEditableLabel.get_text()) - 1)
     xPosition = S_startingX.entryBox.entryBoxEditableLabel.get_text()
@@ -959,6 +1163,7 @@ def update_starting_positions():  # This is called every time the up or down but
     startingPositions[currentIndex] = [xPosition, yPosition, zPosition]
 
 def update_directions():
+    """Copy current theta and phi spin box values into `directions`."""
     global directions
     currentIndex = (int(S_currentSlicingDirection.entryBox.entryBoxEditableLabel.get_text()) - 1)
     theta = S_theta.entryBox.entryBoxEditableLabel.get_text()
@@ -974,6 +1179,7 @@ def update_directions():
     directions[currentIndex] = [theta, phi]
 
 def update_current_selection():
+    """Load the selected slicing direction into the editable spin boxes."""
     global startingPositions
     currentSlicingDirection = S_currentSlicingDirection.entryBox.entryBoxEditableLabel.get_text()
     if currentSlicingDirection == "":
@@ -987,11 +1193,13 @@ def update_current_selection():
     S_phi.entryBox.entryBoxEditableLabel.set_text(str(directions[currentIndex][1]))
 
 def update_placeholder():
+    """Reserved callback for future slicing-direction placeholder updates."""
     pass
 
 """ Functions for adding widgets """
 
 def enable_3_axis_mode():
+    """Configure the settings panel for ordinary 3-axis slicing."""
     R_optionMode.D_variables['numSlicingDirections'] = 1
     R_optionMode.D_variables['startingPositions'] = [[0.0, 0.0, 0.0]]
     R_optionMode.D_variables['directions'] = [[0.0, 0.0]]
@@ -1089,15 +1297,42 @@ def enable_3_axis_mode():
         right=baseGridRight - widgetBufferRight,
         top=6 * widgetHeightSpacing - widgetBufferVertical - 18,
     )
+    settingsBoard.add(
+        r8c0SettingsDeck,
+        left=widgetBufferRight,
+        top=5 * widgetHeightSpacing - widgetBufferVertical - 18,
+    )
+    settingsBoard.add(
+        r8c1SettingsDeck,
+        right=baseGridRight - widgetBufferRight,
+        top=5 * widgetHeightSpacing - widgetBufferVertical - 18,
+    )
+    settingsBoard.add(
+        r9c0SettingsDeck,
+        left=widgetBufferRight,
+        top=4 * widgetHeightSpacing - widgetBufferVertical - 18,
+    )
+    settingsBoard.add(
+        r9c1SettingsDeck,
+        right=baseGridRight - widgetBufferRight,
+        top=4 * widgetHeightSpacing - widgetBufferVertical - 18,
+    )
+    settingsBoard.add(
+        L_movementHelp,
+        left=widgetBufferRight,
+        top=3 * widgetHeightSpacing - widgetBufferVertical - 18,
+    )
     
     cycle_decks(0, 0)
 
 def display_starting_box():
+    """Show the small form that asks for the initial direction count."""
     settingsBoard.add(I_startingBox, center_x_percent=0.5, top=baseGridTop - 2 * widgetHeightSpacing - 2 * widgetBufferVertical)
     slicingDirectionBoard.add(S_numSlicingDirections, left=285, top=baseGridTop - 2 * widgetHeightSpacing - 2 * widgetBufferVertical - 13,)
     slicingDirectionBoard.add(B_numSlicingDirections, left=355, top=baseGridTop - 2 * widgetHeightSpacing - 2 * widgetBufferVertical - 11,)
 
 def display_slicing_directions_box():
+    """Show the detailed 5-axis direction editor."""
     height = 320
 
     rightToolBarBoard.add(I_slicingDirectionBox, left=21, bottom=5)
@@ -1116,6 +1351,7 @@ def display_slicing_directions_box():
     rightToolBarTopBoard.add(S_phi, left=285, top=height - 220)
 
 def enable_5_axis_mode():
+    """Configure the settings panel for 5-axis slicing direction editing."""
     global numSlicingDirections, startingPositions, directions
 
     R_optionMode.D_variables['numSlicingDirections'] = numSlicingDirections
@@ -1230,6 +1466,32 @@ def enable_5_axis_mode():
         right=baseGridRight - widgetBufferRight,
         top=6 * widgetHeightSpacing - widgetBufferVertical - 15 - spacing,
     )
+    if spacing == 0:
+        settingsBoard.add(
+            r8c0SettingsDeck,
+            left=widgetBufferRight,
+            top=5 * widgetHeightSpacing - widgetBufferVertical - 15,
+        )
+        settingsBoard.add(
+            r8c1SettingsDeck,
+            right=baseGridRight - widgetBufferRight,
+            top=5 * widgetHeightSpacing - widgetBufferVertical - 15,
+        )
+        settingsBoard.add(
+            r9c0SettingsDeck,
+            left=widgetBufferRight,
+            top=4 * widgetHeightSpacing - widgetBufferVertical - 15,
+        )
+        settingsBoard.add(
+            r9c1SettingsDeck,
+            right=baseGridRight - widgetBufferRight,
+            top=4 * widgetHeightSpacing - widgetBufferVertical - 15,
+        )
+        settingsBoard.add(
+            L_movementHelp,
+            left=widgetBufferRight,
+            top=3 * widgetHeightSpacing - widgetBufferVertical - 15,
+        )
     
     cycle_decks(0, 0)
 
@@ -1274,8 +1536,7 @@ def initialize_all_widgets(gui, windowHeight):
     topLeftStack1.add(R_viewMode)
     # R0 C1
     baseGrid.add(0, 1, topRightHeaderStack)
-    topRightHeaderBoard.add(L_appTitle, left=24, top=bannerHeight - 26)
-    topRightHeaderBoard.add(languageToggleStack, left=300, top=bannerHeight - 24)
+    topRightHeaderBoard.add(languageToggleStack, left=314, top=bannerHeight - 24)
     # R1 C0
     leftToolBarBoard.add(B_selectFile, left=0, top=baseGridTop)
     leftToolBarBoard.add(R_geometryAction, left=0, bottom=5)
@@ -1586,6 +1847,8 @@ r4c0SettingsDeck = glooey.Deck(
     material=Light_Gray_Background(),
     strength=Light_Gray_Background(),
     resolution=Light_Gray_Background(),
+    # Z hop raises the nozzle during travel moves, reducing scratches or knocks
+    # on printed material. It is a motion-only option.
     movement=Widget_Label("Enable Z-Hop When Travelling"),
     supports=Light_Gray_Background(),
     adhesion=Light_Gray_Background(),
@@ -1605,6 +1868,7 @@ r5c0SettingsDeck = glooey.Deck(
     material=Light_Gray_Background(),
     strength=Light_Gray_Background(),
     resolution=Light_Gray_Background(),
+    # Retraction pulls filament back before travel moves to reduce stringing.
     movement=Widget_Label("Enable Retraction"),
     supports=Light_Gray_Background(),
     adhesion=Light_Gray_Background(),
@@ -1683,6 +1947,43 @@ r7c1SettingsDeck = glooey.Deck(
     adhesion=Light_Gray_Background(),
 )
 
+r8c0SettingsDeck = glooey.Deck(
+    defaultState,
+    material=Light_Gray_Background(),
+    strength=Light_Gray_Background(),
+    resolution=Light_Gray_Background(),
+    movement=Widget_Label("Linked Axis 1 Symbol"),
+    supports=Light_Gray_Background(),
+    adhesion=Light_Gray_Background(),
+)
+r8c1SettingsDeck = glooey.Deck(
+    defaultState,
+    material=Light_Gray_Background(),
+    strength=Light_Gray_Background(),
+    resolution=Light_Gray_Background(),
+    movement=Text_Entry_Box(linkedAxisASymbol, maxLength=1),
+    supports=Light_Gray_Background(),
+    adhesion=Light_Gray_Background(),
+)
+r9c0SettingsDeck = glooey.Deck(
+    defaultState,
+    material=Light_Gray_Background(),
+    strength=Light_Gray_Background(),
+    resolution=Light_Gray_Background(),
+    movement=Widget_Label("Linked Axis 2 Symbol"),
+    supports=Light_Gray_Background(),
+    adhesion=Light_Gray_Background(),
+)
+r9c1SettingsDeck = glooey.Deck(
+    defaultState,
+    material=Light_Gray_Background(),
+    strength=Light_Gray_Background(),
+    resolution=Light_Gray_Background(),
+    movement=Text_Entry_Box(linkedAxisBSymbol, maxLength=1),
+    supports=Light_Gray_Background(),
+    adhesion=Light_Gray_Background(),
+)
+
 r1c0SettingsDeck.get_widget("material").set_style(italic=True)
 r1c0SettingsDeck.get_widget("movement").set_style(italic=True)
 r3c0SettingsDeck.get_widget("material").set_style(italic=True)
@@ -1719,8 +2020,8 @@ sliceButtonDeck.get_widget("B_slice").set_disabled(True) # Start out with the sl
 # R0 C0
 L_appTitle = Title_Label("五轴切片器")
 B_languageToggle = Button(
-    "",
-    "Roboto",
+    "中文 / EN",
+    "Microsoft YaHei UI",
     11,
     "#111111",
     "center",
@@ -1732,6 +2033,8 @@ B_languageToggle = Button(
     toggle_language,
     [],
 )
+if hasattr(B_languageToggle, "set_style"):
+    B_languageToggle.set_style(bold=True)
 L_languageToggle = Widget_Label("中文 / EN")
 L_languageToggle.alignment = "center"
 L_languageToggle.set_color("#111111")
@@ -1744,7 +2047,6 @@ if hasattr(L_languageToggle, "set_height_hint"):
     L_languageToggle.set_height_hint(30)
 languageToggleStack = glooey.Stack()
 languageToggleStack.insert(B_languageToggle, 0)
-languageToggleStack.insert(L_languageToggle, 1)
 R_viewMode = Radio_Buttons(
     "Horizontal",
     True,
@@ -1788,6 +2090,11 @@ L_sliceStatus = Widget_Label("")
 L_sliceStatus.alignment = "center"
 L_sliceStatus.set_color("#666666")
 L_sliceStatus.set_font_size(10)
+L_movementHelp = Widget_Label("")
+L_movementHelp.set_color("#666666")
+L_movementHelp.set_font_size(10)
+if hasattr(L_movementHelp, "set_width_hint"):
+    L_movementHelp.set_width_hint(410)
 R_printMode = Radio_Buttons(
     "Horizontal",
     True,
@@ -1993,6 +2300,9 @@ def register_localized_widgets():
     register_settings_text("movement", "settings.retraction", r5c0SettingsDeck.get_widget("movement"))
     register_settings_text("movement", "settings.retraction_distance", r6c0SettingsDeck.get_widget("movement").get_widget("enabled"))
     register_settings_text("movement", "settings.retraction_speed", r7c0SettingsDeck.get_widget("movement").get_widget("enabled"))
+    register_settings_text("movement", "settings.linked_axis_a", r8c0SettingsDeck.get_widget("movement"))
+    register_settings_text("movement", "settings.linked_axis_b", r9c0SettingsDeck.get_widget("movement"))
+    register_settings_text("movement", "settings.movement_help", L_movementHelp)
 
     register_settings_unit("material", "unit.deg_c", r0c1SettingsDeck.get_widget("material"))
     register_settings_unit("material", "unit.deg_c", r1c1SettingsDeck.get_widget("material"))

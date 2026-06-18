@@ -48,25 +48,54 @@ from .controller import *
 
 """
 Contains all the logic and processes required to run the interactive graphics window.
+
+Developer notes:
+    The GUI is split between this module and `controller.py`. This file owns
+    the Pyglet window, OpenGL state, mouse/keyboard interaction, model buffers,
+    and preview buffers. `controller.py` owns widgets and callbacks. They share
+    state through imported globals because the original UI was written in that
+    style. When refactoring, start by moving one state group at a time behind a
+    small object rather than changing every callback in one step.
 """
+
+# The window owns the visual side of the slicer: OpenGL drawing, camera control,
+# STL loading, slice-plane display, and the bridge from GUI buttons to slicing
+# jobs. Long calculations are queued onto `CalculationWorker` so the Pyglet
+# event loop can keep responding while polygons and toolpaths are generated.
 
 # Global variable
 L_loadedIndices = []  # List of indices that have already been loaded
 
 """ Camera Class """
 class Camera:  # Sets initial camera instance variables
+    """Mutable camera parameters used by mouse drag and scroll handlers."""
+
     def __init__(self):
+        # Distance from camera to model origin. Scrolling adjusts this value.
         self.cameraDistance = 350.0
+        # Orbit angles in degrees. Dragging with the primary camera gesture
+        # updates these values before the OpenGL view transform is rebuilt.
         self.cameraAngleX = 0.0
         self.cameraAngleY = -75.0
+        # Pan offset of the point the camera looks at.
         self.lookPositionX = -60.0
         self.lookPositionY = -20.0
+        # Sensitivities are separated so camera feel can be tuned without
+        # touching event-handler math.
         self.rotateSensitivity = 0.4
         self.scrollSensitivity = 10.0
         self.panningSensitivity = 0.5
 
 """ Calculation Worker Class """
 class CalculationWorker: # Used for Multithreading
+    """Small worker queue for long-running slicing calculations.
+
+    Pyglet expects rendering and widget updates to happen on the main thread.
+    Slicing can be expensive, so tasks are submitted to a thread pool and their
+    completed futures are returned through `result_queue`. `Graphics_Window`
+    polls that queue from the main event loop.
+    """
+
     def __init__(self):
         self.task_queue = queue.Queue()                         # Stores tasks to be processed
         self.result_queue = queue.Queue()                       # Stores completed results
@@ -74,10 +103,13 @@ class CalculationWorker: # Used for Multithreading
         self.running = True                                     # Controls worker lifecycle
         
     def start(self):
-        # Launches daemon thread that processes queued tasks
+        """Launch the queue-processing loop on a daemon thread."""
+        # The thread is daemonized so the process can exit even if the GUI is
+        # closed while the worker is waiting for another task.
         threading.Thread(target=self.process_queue, daemon=True).start()
         
     def process_queue(self):
+        """Move queued tasks into the thread pool and publish completed futures."""
         while self.running:
             try:
                 # Get next task from queue
@@ -94,7 +126,9 @@ class CalculationWorker: # Used for Multithreading
         self.thread_pool.shutdown(wait=False)
                 
     def add_task(self, function, callback, *args, progress_callback=None):
-        # Adds new task to queue with function to run, callback to handle result, and arguments
+        """Queue one background task and its main-thread completion callback."""
+        # `progress_callback` is reserved for future progress UI. It is stored
+        # with the result tuple so the polling side can update the GUI later.
         self.task_queue.put({
             'function': function,
             'callback': callback,
@@ -103,11 +137,21 @@ class CalculationWorker: # Used for Multithreading
         })
 
     def stop(self):
+        """Request the worker loop to stop."""
         self.running = False
 
 
 """ Graphics_Window Class """
 class Graphics_Window(pyglet.window.Window):  # Custom pyglet window which contains everything (both the 3D interactive viewport and the widget foreground)
+    """Main desktop window containing the viewport and Glooey widget layer.
+
+    Class dictionaries are used as shared stores for STL transforms, selection
+    state, and preview buffers. This mirrors the original GUI design and lets
+    callback functions access state without passing a window object everywhere.
+    New code should prefer instance attributes when possible, then migrate one
+    class dictionary at a time when behavior is covered by smoke tests.
+    """
+
     # Initialize Class Variables:
     D_finalPositions = {}
     D_finalRotations = {}
@@ -136,6 +180,7 @@ class Graphics_Window(pyglet.window.Window):  # Custom pyglet window which conta
     D_slicePlaneValidity = {}
 
     def __init__(self, *args, **kwargs):
+        """Initialize OpenGL state, renderer helpers, widgets, and worker queue."""
         super().__init__(*args, **kwargs)
         glClearColor(245.0 / 255.0, 245.0 / 255.0, 247.0 / 255.0, 1.0)
 
@@ -175,6 +220,9 @@ class Graphics_Window(pyglet.window.Window):  # Custom pyglet window which conta
         self.calculation_in_progress = False
 
     def check_calculation_results(self, dt): # For Multithreading
+        # Pyglet drawing and widgets must be updated from the main thread. The
+        # worker thread only computes; this method pulls completed futures back
+        # into the GUI loop and runs the corresponding callback safely.
         try:
             callback, future, progress_callback = self.worker.result_queue.get_nowait()
             if future.done():
@@ -191,10 +239,14 @@ class Graphics_Window(pyglet.window.Window):  # Custom pyglet window which conta
             pass
 
     def queue_slicing_calculations(self, inputs):
+        """Submit a slicing request to the background worker."""
+        # Slicing can take seconds to minutes for complex STL files, so the
+        # button schedules work instead of running it directly inside `on_draw`.
         self.calculation_in_progress = True
         self.worker.add_task(self.slicing_calculations, self.TEST_slicing_callback, inputs, progress_callback=self.update_slicing_progress)
 
     def slicing_calculations(self, meshData):
+        """Worker-thread entry point that calls the controller slicing callback."""
         slice_function(meshData)
         result = 'test'
         return result
@@ -217,6 +269,7 @@ class Graphics_Window(pyglet.window.Window):  # Custom pyglet window which conta
         #     self.status_label.text = "Calculations complete!"
 
     def update_slicing_progress(self, progress):
+        """Reserved hook for future progress reporting from background slicing."""
         # Update progress bar or other UI elements
         # self.progress_bar.value = progress * 100
         pass
@@ -1446,7 +1499,9 @@ class Render_SlicePlanes:
             self.current_vbo = None
 
     def define_slicePlane(self, startX, startY, startZ, theta, phi, radius=50.0, segments=32):
-        # Convert spherical coordinates (theta, phi) to Cartesian (normal vector)
+        # The user edits theta and phi in the slicing-direction panel. The
+        # renderer converts those spherical angles into a normal vector, then
+        # draws a circular disk so the plane position is visible in the viewport.
         self.cleanup_current_vbo()
 
         theta = theta*(np.pi/180.0)

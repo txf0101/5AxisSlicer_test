@@ -19,6 +19,24 @@ DISABLED = (235, 235, 235, 255)
 OUTLINE = (208, 208, 208, 255)
 TRANSPARENT = (255, 255, 255, 0)
 
+FIXED_IMAGE_SIZES = {
+    "viewMode_Radio_Button_Images/background.png": (240, 32),
+    "printMode_Radio_Button_Images/background.png": (450, 32),
+    "optionMode_Radio_Button_Images/background.png": (450, 32),
+}
+
+for name in ["prepare", "preview"]:
+    for state in ["R_uncheckedBase.png", "R_uncheckedOver.png", "R_uncheckedDown.png", "R_checked.png"]:
+        FIXED_IMAGE_SIZES[f"viewMode_Radio_Button_Images/{name}/{state}"] = (120, 32)
+
+for name in ["5AxisMode", "3AxisMode"]:
+    for state in ["R_uncheckedBase.png", "R_uncheckedOver.png", "R_uncheckedDown.png", "R_checked.png"]:
+        FIXED_IMAGE_SIZES[f"printMode_Radio_Button_Images/{name}/{state}"] = (225, 32)
+
+for name in ["material", "strength", "resolution", "movement", "supports", "adhesion"]:
+    for state in ["R_uncheckedBase.png", "R_uncheckedOver.png", "R_uncheckedDown.png", "R_checked.png"]:
+        FIXED_IMAGE_SIZES[f"optionMode_Radio_Button_Images/{name}/{state}"] = (75, 32)
+
 
 def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     candidates = [
@@ -46,6 +64,9 @@ def write(path: Path, image: Image.Image) -> None:
 
 
 def existing_size(path: Path) -> tuple[int, int]:
+    relative = path.relative_to(ASSETS).as_posix()
+    if relative in FIXED_IMAGE_SIZES:
+        return FIXED_IMAGE_SIZES[relative]
     return Image.open(path).size
 
 

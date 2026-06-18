@@ -29,6 +29,13 @@ from pathlib import Path
 
 """
 Contains all classes that define the structure of the custom widgets that are used to populate the GUI.
+
+Developer notes:
+    This module wraps Glooey widgets so the rest of the application can work
+    with project-specific controls such as image buttons, numeric entry boxes,
+    and radio groups. Most classes are thin UI adapters. Keep behavior that is
+    specific to slicing parameters in `controller.py`; keep reusable widget
+    mechanics here.
 """
 
 ASSET_DIR = Path(__file__).resolve().parents[1] / "assets"
@@ -44,6 +51,7 @@ ACCENT_COLOR = "#111111"
 
 
 def resolve_asset_path(path):
+    """Return an absolute asset path for a relative packaged image path."""
     path = Path(path)
     if path.is_absolute():
         return str(path)
@@ -51,12 +59,20 @@ def resolve_asset_path(path):
 
 
 def load_image(path):
+    """Load a Pyglet image from the packaged asset directory."""
     return pyglet.image.load(resolve_asset_path(path))
 
 
 """ CUSTOM DECORATION CLASSES """
 
 class Custom_Image(glooey.Frame):
+    """Frame that displays a replaceable background image.
+
+    The slicing direction panels use language-specific background images, so
+    `set_image()` lets the controller swap the image when the UI language
+    changes.
+    """
+
     custom_alignment = "top"
 
     class Decoration(glooey.Background):
@@ -72,12 +88,15 @@ class Custom_Image(glooey.Frame):
         self.decoration.set_image(load_image(self.backgroundImage))
 
 class Light_Gray_Background(glooey.Background):
+    """Plain panel background used for inactive or empty deck cells."""
     custom_color = PANEL_COLOR
 
 class Dark_Gray_Background(glooey.Background):
+    """Header-colored background block."""
     custom_color = HEADER_COLOR
 
 class Pop_Up_Box_Label(glooey.Label):
+    """Small bold label used inside floating option panels."""
     custom_font_size = 11
     custom_color = TEXT_COLOR
     custom_font_name = "Roboto"
@@ -85,6 +104,7 @@ class Pop_Up_Box_Label(glooey.Label):
     custom_alignment = "center"
 
 class Title_Label(glooey.Label):
+    """Panel title label."""
     custom_font_size = 16
     custom_color = TEXT_COLOR
     custom_font_name = "Roboto"
@@ -92,12 +112,15 @@ class Title_Label(glooey.Label):
     custom_alignment = "center"
 
 class Widget_Label(glooey.Label):
+    """Standard settings-row label."""
     custom_font_size = 11
     custom_color = TEXT_COLOR
     custom_font_name = "Roboto"
     custom_bold = False
 
 class Black_Underline_Frame(glooey.Frame):  # This is the background rectangle for the selected option
+    """One-pixel accent line used below selected tabs."""
+
     class Box(glooey.Bin):
         custom_padding = 0
         custom_width_hint = 450
@@ -107,6 +130,8 @@ class Black_Underline_Frame(glooey.Frame):  # This is the background rectangle f
         custom_color = ACCENT_COLOR
 
 class Gray_Underline_Frame(glooey.Frame):  # This is the background rectangle for the selected option
+    """One-pixel divider line used in the right panel."""
+
     class Box(glooey.Bin):
         custom_padding = 0
         custom_width_hint = 450
@@ -118,6 +143,14 @@ class Gray_Underline_Frame(glooey.Frame):  # This is the background rectangle fo
 """ SPIN BOX CLASSES """
 
 class Spin_Box(glooey.Widget):
+    """Numeric input with increment and decrement buttons.
+
+    The control is composed from a text entry and two image buttons. Values are
+    clamped to `minValue` and `maxValue`; `updateFunction` is called whenever a
+    button changes the value so the controller can copy the value into its
+    state lists.
+    """
+
     custom_alignment = "center"
 
     def __init__(
@@ -182,6 +215,7 @@ class Spin_Box(glooey.Widget):
         self._attach_child(spinBoxHBox)
 
     def up(self):
+        """Increase the value by one configured increment and clamp to bounds."""
         if (
             self.entryBox.entryBoxEditableLabel.get_text() in self.NANs
         ):  # If the user deleted everything in the spinbox, use zero as the currentValue
@@ -199,6 +233,7 @@ class Spin_Box(glooey.Widget):
         self.updateFunction()  #
 
     def down(self):
+        """Decrease the value by one configured increment and clamp to bounds."""
         if (
             self.entryBox.entryBoxEditableLabel.get_text() in self.NANs
         ):  # If the user deleted everything in the spinbox, use zero as the currentValue
@@ -214,12 +249,15 @@ class Spin_Box(glooey.Widget):
         self.updateFunction()  #
 
     def update_maxValue(self, newValue):
+        """Update the maximum allowed value after direction count changes."""
         self.maxValue = newValue
         self.entryBox.maxValue = newValue
         self.entryBox.entryBoxEditableLabel.maxValue = newValue
 
 
 class Spin_Box_Entry_Box(glooey.Stack):
+    """Layered text entry plus unit label used inside `Spin_Box`."""
+
     def __init__(self, boxWidth, defaultValue, minValue, maxValue, units):
         super().__init__()
         self.boxWidth = boxWidth
@@ -726,6 +764,13 @@ class Drop_Down_Menu(glooey.Widget):
 """ NEWLY REVISED RADIO BUTTON CLASSES """
 
 class Radio_Buttons(glooey.Stack):  # This stack will contain the frame and organizer
+    """Grouped radio buttons used for view mode, print mode, and settings tabs.
+
+    The project uses image-based controls, so this wrapper keeps the selected
+    name, disabled state, and label styling in one place instead of scattering
+    that bookkeeping through the controller.
+    """
+
     def __init__(
         self,
         orientation,
@@ -940,6 +985,8 @@ class Radio_Button(glooey.RadioButton):
 """ CHECKBOX CLASS """
 
 class Checkbox(glooey.Checkbox):
+    """Image-skinned checkbox with a simple disabled state."""
+
     custom_checked_base = load_image("image_resources/CheckBox_Images/checkedBase.png")
     custom_checked_over = load_image("image_resources/CheckBox_Images/checkedOver.png")
     custom_checked_down = load_image("image_resources/CheckBox_Images/checkedDown.png")
@@ -1182,6 +1229,12 @@ class Disableable_Unlabeled_Image_Button(glooey.Button):
 """ NEWLY REVISED ENTRY BOX CLASSES """
 
 class Entry_Box(glooey.Stack):
+    """Numeric text field with bounds and a small unit label.
+
+    The editable label validates its own value later in this file. This wrapper
+    is responsible for arranging the frame, the number, and the unit text.
+    """
+
     def __init__(self, defaultValue, minValue, maxValue, units):
         super().__init__()
         self.defaultValue = defaultValue
@@ -1252,6 +1305,92 @@ class Entry_Box(glooey.Stack):
 
     class Units_Label(glooey.Label):
         custom_padding = 4
+
+
+class Text_Entry_Box(glooey.Stack):
+    """Small editable text box for machine labels such as linked axis symbols."""
+
+    def __init__(self, defaultValue, maxLength=12):
+        super().__init__()
+        self.defaultValue = defaultValue
+        self.maxLength = maxLength
+        self._disabled = False
+
+        self.entryBoxFrame = self.Text_Entry_Box_Frame()
+        self.entryBoxEditableLabel = self.Text_Entry_Box_EditableLabel(self.defaultValue)
+        self.entryBoxEditableLabel.maxLength = self.maxLength
+        self.entryBoxEditableLabel.set_font_name("Roboto")
+
+        self.insert(self.entryBoxFrame, 0)
+        self.insert(self.entryBoxEditableLabel, 1)
+
+    def set_disabled(self, disabled=True):
+        self._disabled = disabled
+        self.entryBoxEditableLabel._disabled = disabled
+        if disabled:
+            self.entryBoxFrame.decoration.set_color("#EEF3F8")
+            self.entryBoxFrame.decoration.set_outline("#E1E8F0")
+            self.entryBoxEditableLabel.set_text_color((128, 128, 128, 255))
+        else:
+            self.entryBoxFrame.decoration.set_color(CONTROL_COLOR)
+            self.entryBoxFrame.decoration.set_outline(CONTROL_OUTLINE)
+            self.entryBoxEditableLabel.set_text_color((0, 0, 0, 255))
+
+    class Text_Entry_Box_Frame(glooey.Frame):
+        class Box(glooey.Bin):
+            custom_width_hint = 100
+            custom_height_hint = 28
+
+        class Decoration(glooey.Background):
+            custom_color = CONTROL_COLOR
+            custom_outline = CONTROL_OUTLINE
+
+            def on_mouse_enter(self, x, y):
+                if not self.parent.parent._disabled:
+                    self.set_color(CONTROL_HOVER_COLOR)
+                    self.set_outline(ACCENT_COLOR)
+                    super().on_mouse_enter(x, y)
+
+            def on_mouse_leave(self, x, y):
+                if not self.parent.parent._disabled:
+                    self.set_color(CONTROL_COLOR)
+                    self.set_outline(CONTROL_OUTLINE)
+                    super().on_mouse_leave(x, y)
+
+    class Text_Entry_Box_EditableLabel(glooey.EditableLabel):
+        custom_color = TEXT_COLOR
+        custom_selection_color = "white"
+        custom_selection_background_color = ACCENT_COLOR
+        custom_alignment = "left"
+        custom_width_hint = 90
+        custom_padding = 4
+
+        def __init__(self, text="", line_wrap=None, **style):
+            super().__init__(text, line_wrap, **style)
+            self._disabled = False
+            self.maxLength = 12
+
+        def set_text_color(self, color):
+            if self._layout and self._layout.document:
+                self._layout.document.set_style(
+                    0, len(self._layout.document.text), {"color": color}
+                )
+
+        def on_mouse_press(self, x, y, button, modifiers):
+            if not self._disabled:
+                super().on_mouse_press(x, y, button, modifiers)
+
+        def on_text(self, text):
+            if self._disabled:
+                return
+            if text.isspace():
+                return
+            if len(self.get_text()) + len(text) <= self.maxLength:
+                super().on_text(text)
+
+        def on_text_motion(self, motion, select=False):
+            if not self._disabled:
+                super().on_text_motion(motion, select)
 
 
 class Entry_Box_EditableLabel(glooey.EditableLabel):
